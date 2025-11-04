@@ -74,6 +74,15 @@ public static class BossPowerPatches
 			}
 		}
 	}
+	
+	[HarmonyPatch(typeof(SE_Stats), nameof(SE_Stats.ModifySwimStaminaUsage))]
+	private class ModifySwimStaminaUsage
+	{
+		private static void Prefix(SE_Stats __instance, float baseStaminaUse, ref float staminaUse)
+		{
+			__instance.m_swimStaminaUseModifier = SwimStaminaUsage.Total() / 100f;
+		}
+	}
 
 	[HarmonyPatch(typeof(SEMan), nameof(SEMan.ModifyAttack))]
 	private class IncreaseTerrainDamage
@@ -87,35 +96,45 @@ public static class BossPowerPatches
 			}
 		}
 	}
-
-	[HarmonyPatch(typeof(Character), nameof(Character.RPC_Damage))]
-	private class DecreaseDamageTaken
+	
+	[HarmonyPatch(typeof(SE_Stats), nameof(SE_Stats.ModifySneakStaminaUsage))]
+	private class SEManModifyStaminaRegen
 	{
-		private static void Prefix(Character __instance, HitData hit)
+		private static void Prefix(SE_Stats __instance, float baseStaminaUse, ref float staminaUse)
 		{
-			if (__instance is Player)
-			{
-				hit.m_damage.m_blunt *= 1 - PhysicalDamage.Total() / 100f;
-				hit.m_damage.m_pierce *= 1 - PhysicalDamage.Total() / 100f;
-				hit.m_damage.m_slash *= 1 - PhysicalDamage.Total() / 100f;
-
-				hit.m_damage.m_fire *= 1 - ElementalDamage.Total() / 100f;
-				hit.m_damage.m_frost *= 1 - ElementalDamage.Total() / 100f;
-				hit.m_damage.m_poison *= 1 - ElementalDamage.Total() / 100f;
-				hit.m_damage.m_lightning *= 1 - ElementalDamage.Total() / 100f;
-			}
+			// Stamina stops being used when sneaking at m_sneakStaminaUseModifier = -0.5
+			if (__instance.m_character.IsCrouching())
+				__instance.m_sneakStaminaUseModifier = 1 - StaminaCrouchRegen.Total() * 1.5f / 100f;
 		}
 	}
 
 	[HarmonyPatch(typeof(Character), nameof(Character.Damage))]
-	private class AddFireDamage
+	private class ModifyDamageDoneOrTaken
 	{
-		private static void Prefix(HitData hit)
+		private static void Prefix(HitData hit, Character __instance)
 		{
 			if (hit.GetAttacker() is Player)
 			{
-				hit.m_damage.m_fire += hit.GetTotalDamage() * BonusFireDamage.Total() / 100f;
+				float totalBaseDamage = hit.GetTotalDamage();
+                hit.m_damage.m_fire = (hit.m_damage.m_fire + totalBaseDamage * BonusFireDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_frost = (hit.m_damage.m_frost + totalBaseDamage * BonusFrostDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_poison = (hit.m_damage.m_poison + totalBaseDamage * BonusPoisonDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_lightning = (hit.m_damage.m_lightning + totalBaseDamage * BonusLightningDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_spirit = (hit.m_damage.m_spirit + totalBaseDamage * BonusSpiritDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_blunt = (hit.m_damage.m_blunt + totalBaseDamage * BonusBluntDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_pierce = (hit.m_damage.m_pierce + totalBaseDamage * BonusPierceDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
+                hit.m_damage.m_slash = (hit.m_damage.m_slash + totalBaseDamage * BonusSlashDamage.Total() / 100f) * (1 + BonusDamage.Total() / 100f);
 			}
+			if (__instance.IsPlayer())
+			{
+				hit.m_damage.m_fire *= 1 - BonusFireDefense.Total() / 100f;
+				hit.m_damage.m_frost *= 1 - BonusFrostDefense.Total() / 100f;
+				hit.m_damage.m_poison *= 1 - BonusPoisonDefense.Total() / 100f;
+				hit.m_damage.m_lightning *= 1 - BonusLightningDefense.Total() / 100f;
+                hit.m_damage.m_blunt *= 1 - PhysicalDamage.Total() / 100f;
+                hit.m_damage.m_pierce *= 1 - PhysicalDamage.Total() / 100f;
+                hit.m_damage.m_slash *= 1 - PhysicalDamage.Total() / 100f;
+            }
 		}
 	}
 
@@ -217,7 +236,38 @@ public static class BossPowerPatches
 		[UsedImplicitly]
 		private static void Postfix(Player __instance, ref float __result)
 		{
-			__result *= 1 + CarryWeight.Total() / 100f;
+			__result += CarryWeight.Total();
 		}
 	}
+
+	[HarmonyPatch(typeof(SEMan), nameof(SEMan.ModifyAdrenaline))]
+	private static class ModifyAdrenaline
+	{
+		[UsedImplicitly]
+		public static void Prefix(float baseValue, ref float use)
+		{
+			use *= 1 + AdrenalineBonus.Total() / 100f;
+		}
+	}
+
+	[HarmonyPatch(typeof(SEMan), nameof(SEMan.ModifyStagger))]
+	private static class ModifyStagger
+	{
+		[UsedImplicitly]
+		public static void Prefix(float baseValue, ref float use)
+		{
+			use = 1 + StaggerResist.Total() * -1 / 100f;
+		}
+	}
+	
+	[HarmonyPatch(typeof(SEMan), nameof(SEMan.ModifyBlockStaminaUsage))]
+	private static class ModifyBlockStaminaUsage
+	{
+		[UsedImplicitly]
+		public static void Prefix(float baseStaminaUse, ref float staminaUse)
+		{
+			staminaUse = staminaUse * (1 + BlockStaminaUsage.Total() * -1 / 100f) + BlockStaminaReturn.Total() * -1;
+		}
+	}
+
 }
