@@ -97,14 +97,17 @@ public static class BossPowerPatches
 		}
 	}
 	
-	[HarmonyPatch(typeof(SE_Stats), nameof(SE_Stats.ModifySneakStaminaUsage))]
-	private class SEManModifyStaminaRegen
+	[HarmonyPatch(typeof(SEMan), nameof(SEMan.ModifySneakStaminaUsage))]
+	private class SEManModifyStaminaSneakUsage
 	{
-		private static void Prefix(SE_Stats __instance, float baseStaminaUse, ref float staminaUse)
+		[UsedImplicitly]
+		private static void Postfix(SEMan __instance, float baseStaminaUse, ref float staminaUse)
 		{
-			// Stamina stops being used when sneaking at m_sneakStaminaUseModifier = -0.5
-			if (__instance.m_character.IsCrouching())
-				__instance.m_sneakStaminaUseModifier = 1 - StaminaCrouchRegen.Total() * 1.5f / 100f;
+			// staminaUse is the final value to deplete to the stamina player
+			if (__instance.m_character.IsSneaking())
+			{
+				staminaUse -= staminaUse * StaminaSneakUsage.Total() / 100f;
+			}
 		}
 	}
 
@@ -254,9 +257,10 @@ public static class BossPowerPatches
 	private static class ModifyStagger
 	{
 		[UsedImplicitly]
-		public static void Prefix(float baseValue, ref float use)
+		public static void Postfix(float baseValue, ref float use)
 		{
-			use = 1 + StaggerResist.Total() * -1 / 100f;
+			// use is the final value to the stagger
+			use -= use * StaggerResist.Total() / 100f;
 		}
 	}
 	
