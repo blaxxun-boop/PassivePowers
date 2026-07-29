@@ -80,7 +80,7 @@ public static class BossPowerPatches
 	{
 		private static void Prefix(SE_Stats __instance, float baseStaminaUse, ref float staminaUse)
 		{
-			__instance.m_swimStaminaUseModifier = SwimStaminaUsage.Total() / 100f;
+			__instance.m_swimStaminaUseModifier = -(SwimStaminaUsage.Total() / 100f);
 		}
 	}
 
