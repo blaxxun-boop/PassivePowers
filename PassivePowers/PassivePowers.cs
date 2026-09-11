@@ -21,7 +21,7 @@ namespace PassivePowers;
 public class PassivePowers : BaseUnityPlugin
 {
 	private const string ModName = "Passive Powers";
-	private const string ModVersion = "1.1.7";
+	private const string ModVersion = "1.1.8";
 	private const string ModGUID = "org.bepinex.plugins.passivepowers";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
@@ -232,7 +232,7 @@ public class PassivePowers : BaseUnityPlugin
 	[HarmonyPatch(typeof(Player), nameof(Player.ActivateGuardianPower))]
 	private static class DedicatedGuardianPowerRPC
 	{
-		private static StatusEffect? StatusEffectRPC(SEMan seman, int nameHash, bool resetTime, int itemLevel, float skillLevel)
+		private static StatusEffect? StatusEffectRPC(SEMan seman, int nameHash, bool resetTime, int itemLevel, float skillLevel, short variant)
 		{
 			string name = ObjectDB.instance.GetStatusEffect(nameHash).name;
 			Spread spread = PowerSpread[name.Substring("PassivePowers ".Length)].Value;
@@ -242,14 +242,14 @@ public class PassivePowers : BaseUnityPlugin
 			}
 			else if (spread == Spread.Everyone || Player.m_localPlayer == seman.m_character)
 			{
-				return seman.AddStatusEffect(nameHash, resetTime, itemLevel, skillLevel);
+				return seman.AddStatusEffect(nameHash, resetTime, itemLevel, skillLevel, variant);
 			}
 			return null;
 		}
 
 		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
 		{
-			MethodInfo AddStatusEffect = AccessTools.DeclaredMethod(typeof(SEMan), nameof(SEMan.AddStatusEffect), new[] { typeof(int), typeof(bool), typeof(int), typeof(float) });
+			MethodInfo AddStatusEffect = AccessTools.DeclaredMethod(typeof(SEMan), nameof(SEMan.AddStatusEffect), new[] { typeof(int), typeof(bool), typeof(int), typeof(float), typeof(short) });
 
 			foreach (CodeInstruction instruction in instructions)
 			{
@@ -612,36 +612,6 @@ public class PassivePowers : BaseUnityPlugin
 			return false;
 		}
 	}
-
-	[HarmonyPatch(typeof(PlayerProfile), nameof(PlayerProfile.SavePlayerData))]
-	private static class SaveBossKills
-	{
-		private static void Prefix(PlayerProfile __instance, Player player)
-		{
-			foreach (KeyValuePair<string, float> stat in __instance.m_enemyStats)
-			{
-				player.m_customData[stat.Key] = stat.Value.ToString(CultureInfo.InvariantCulture);
-			}
-		}
-	}
-
-	[HarmonyPatch(typeof(PlayerProfile), nameof(PlayerProfile.LoadPlayerData))]
-	private static class LoadBossKills
-	{
-		private static void Postfix(PlayerProfile __instance, Player player)
-		{
-			if (ZNetScene.instance)
-			{
-				foreach (GameObject gameObject in ZNetScene.instance.m_prefabs)
-				{
-					if (gameObject.GetComponent<Character>() is { } character && player.m_customData.TryGetValue(character.m_name, out string valueStr) && float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) && !__instance.m_enemyStats.ContainsKey(character.m_name))
-					{
-						__instance.m_enemyStats[character.m_name] = value;
-					}
-				}
-			}
-		}
-	}
 	
 	[HarmonyPatch(typeof(Character), nameof(Character.OnDeath))]
 	public static class CountBossKills
@@ -666,6 +636,6 @@ public class PassivePowers : BaseUnityPlugin
 
 	private static void BossDied(long sender, string bossName)
 	{
-		Game.instance.GetPlayerProfile().m_enemyStats.IncrementOrSet(bossName);
+		Game.instance.GetPlayerProfile().m_playerStats[0].m_enemyStats[0].IncrementOrSet(bossName);
 	}
 }

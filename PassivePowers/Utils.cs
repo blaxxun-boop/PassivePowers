@@ -45,7 +45,7 @@ public static class Utils
 	private static bool PowerEnabled(Dictionary<string, ConfigEntry<int>> required, string powerName)
 	{
 		int value = required[powerName].Value;
-		Game.instance.GetPlayerProfile().m_enemyStats.TryGetValue(effectToBossMap[powerName], out float kills);
+		Game.instance.GetPlayerProfile().m_playerStats[0].m_enemyStats[0].TryGetValue(effectToBossMap[powerName], out float kills);
 		return value >= 0 && value <= kills;
 	}
 
