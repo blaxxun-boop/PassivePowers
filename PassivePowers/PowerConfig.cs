@@ -37,7 +37,7 @@ public abstract class PowerConfig<T, U>(T Active, T Passive): PowerConfig where 
 	public override object BoxedActive => Active;
 	public override object BoxedPassive => Passive;
 
-	private T Value(string powerName) => Player.m_localPlayer is {} player && Utils.CanApplyPower(player, powerName) ? player.m_seman.HaveStatusEffect(("PassivePowers Depletion " + powerName).GetStableHashCode()) ? default : Player.m_localPlayer.m_seman.HaveStatusEffect(("PassivePowers " + powerName).GetStableHashCode()) ? Active : Passive : default;
+	private T Value(string powerName) => Player.m_localPlayer is {} player && Utils.CanApplyPower(player, powerName) ? Utils.IsPowerDepleted(player, powerName) ? default : Player.m_localPlayer.m_seman.HaveStatusEffect(("PassivePowers " + powerName).GetStableHashCode()) ? Active : Passive : default;
 	
 	public static T Total() => Cast(PassivePowers.activeBossConfigs.Sum(kv => kv.Value.Configs.Sum(c => c is U cfg ? cfg.Value(kv.Key).ToSingle(CultureInfo.InvariantCulture) : 0)));
 

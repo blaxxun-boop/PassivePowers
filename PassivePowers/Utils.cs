@@ -28,6 +28,10 @@ public static class Utils
 	}
 
 	public static bool CanApplyPower(Player player, string power) => getPassivePowers(player).Contains(power) || player.GetSEMan().HaveStatusEffect(("PassivePowers " + power).GetStableHashCode());
+
+	public static bool IsPowerDepleted(Player player, string power) => PassivePowers.DepletionEnabled() && player.m_seman.HaveStatusEffect(("PassivePowers Depletion " + power).GetStableHashCode());
+
+	public static Dictionary<string, float> EnemyStats(this PlayerProfile profile) => profile.m_playerStats[0].m_enemyStats[0];
 	
 	public static bool ActivePowersEnabled() => PassivePowers.requiredBossKillsActive.Any(v => v.Value.Value >= 0);
 
@@ -45,7 +49,7 @@ public static class Utils
 	private static bool PowerEnabled(Dictionary<string, ConfigEntry<int>> required, string powerName)
 	{
 		int value = required[powerName].Value;
-		Game.instance.GetPlayerProfile().m_enemyStats.TryGetValue(effectToBossMap[powerName], out float kills);
+		Game.instance.GetPlayerProfile().EnemyStats().TryGetValue(effectToBossMap[powerName], out float kills);
 		return value >= 0 && value <= kills;
 	}
 

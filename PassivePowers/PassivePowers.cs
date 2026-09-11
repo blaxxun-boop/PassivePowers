@@ -7,6 +7,7 @@ using System.Reflection.Emit;
 using System.Text;
 using BepInEx;
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using HarmonyLib;
 using LocalizationManager;
 using ServerSync;
@@ -21,10 +22,12 @@ namespace PassivePowers;
 public class PassivePowers : BaseUnityPlugin
 {
 	private const string ModName = "Passive Powers";
-	private const string ModVersion = "1.1.7";
+	private const string ModVersion = "1.1.8";
 	private const string ModGUID = "org.bepinex.plugins.passivepowers";
 
 	private static readonly ConfigSync configSync = new(ModGUID) { DisplayName = ModName, CurrentVersion = ModVersion, MinimumRequiredVersion = ModVersion };
+
+	public static ManualLogSource Log = null!;
 
 	public static object? configManager;
 	private static void reloadConfigDisplay() => configManager?.GetType().GetMethod("BuildSettingList")!.Invoke(configManager, Array.Empty<object>());
@@ -75,12 +78,16 @@ public class PassivePowers : BaseUnityPlugin
 
 	private static void bossConfigChanged(string PowerName) => activeBossConfigs[PowerName] = new BossConfig(bossConfigs[PowerName].Value);
 
+	// A depletion duration of 0 disables the depletion effect entirely.
+	public static bool DepletionEnabled() => activeBossPowerDepletion.Value > 0;
+
 	private ConfigEntry<T> config<T>(string group, string name, T value, string description, bool synchronizedSetting = true) => config(group, name, value, new ConfigDescription(description), synchronizedSetting);
 
 	private readonly ConfigurationManagerAttributes activeBossPowerSettingAttributes = new();
 
 	public void Awake()
 	{
+		Log = Logger;
 		Localizer.Load();
 
 		Assembly? bepinexConfigManager = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "ConfigurationManager");
@@ -93,7 +100,7 @@ public class PassivePowers : BaseUnityPlugin
 		activeBossPowerCooldown.SettingChanged += activeBossPowerSettingChanged;
 		activeBossPowerDuration = config("2 - Active Powers", "Duration for active boss powers (seconds)", 30, new ConfigDescription("Duration of the buff from activating boss powers.", null, activeBossPowerSettingAttributes));
 		activeBossPowerDuration.SettingChanged += activeBossPowerSettingChanged;
-		activeBossPowerDepletion = config("2 - Active Powers", "Power loss duration after boss power activation (seconds)", 180, new ConfigDescription("Disables the passive effect of the boss power for the specified duration after the active effect ends.", null, activeBossPowerSettingAttributes));
+		activeBossPowerDepletion = config("2 - Active Powers", "Power loss duration after boss power activation (seconds)", 180, new ConfigDescription("Disables the passive effect of the boss power for the specified duration after the active effect ends. Use 0 to never disable the passive effect.", null, activeBossPowerSettingAttributes));
 		activeBossPowerDepletion.SettingChanged += activeBossPowerSettingChanged;
 
 		bossConfig(Power.Eikthyr, 3, "Eikthyr", "RunStamina:15:60,JumpStamina:15:60,SwimStaminaUsage:15:60");
@@ -232,35 +239,47 @@ public class PassivePowers : BaseUnityPlugin
 	[HarmonyPatch(typeof(Player), nameof(Player.ActivateGuardianPower))]
 	private static class DedicatedGuardianPowerRPC
 	{
-		private static StatusEffect? StatusEffectRPC(SEMan seman, int nameHash, bool resetTime, int itemLevel, float skillLevel)
+		private const string statusEffectPrefix = "PassivePowers ";
+
+		private static StatusEffect? StatusEffectRPC(SEMan seman, int nameHash, bool resetTime, int itemLevel, float skillLevel, short variant)
 		{
-			string name = ObjectDB.instance.GetStatusEffect(nameHash).name;
-			Spread spread = PowerSpread[name.Substring("PassivePowers ".Length)].Value;
-			if (spread == Spread.ConditionsMet)
+			if (ObjectDB.instance.GetStatusEffect(nameHash) is not { } statusEffect
+			    || !statusEffect.name.StartsWith(statusEffectPrefix, StringComparison.Ordinal)
+			    || !PowerSpread.TryGetValue(statusEffect.name.Substring(statusEffectPrefix.Length), out ConfigEntry<Spread>? spread))
 			{
-				seman.m_nview.InvokeRPC("PassivePowers Activate BossPower", name);
+				return seman.AddStatusEffect(nameHash, resetTime, itemLevel, skillLevel, variant);
 			}
-			else if (spread == Spread.Everyone || Player.m_localPlayer == seman.m_character)
+
+			if (spread.Value == Spread.ConditionsMet)
 			{
-				return seman.AddStatusEffect(nameHash, resetTime, itemLevel, skillLevel);
+				seman.m_nview.InvokeRPC("PassivePowers Activate BossPower", statusEffect.name);
+			}
+			else if (spread.Value == Spread.Everyone || Player.m_localPlayer == seman.m_character)
+			{
+				return seman.AddStatusEffect(nameHash, resetTime, itemLevel, skillLevel, variant);
 			}
 			return null;
 		}
 
+		private static readonly MethodInfo AddStatusEffectSignature = AccessTools.DeclaredMethod(typeof(SEMan), nameof(SEMan.AddStatusEffect), new[] { typeof(int), typeof(bool), typeof(int), typeof(float), typeof(short) });
+		private static readonly MethodInfo StatusEffectRPCReplacement = AccessTools.DeclaredMethod(typeof(DedicatedGuardianPowerRPC), nameof(StatusEffectRPC));
+
 		private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
 		{
-			MethodInfo AddStatusEffect = AccessTools.DeclaredMethod(typeof(SEMan), nameof(SEMan.AddStatusEffect), new[] { typeof(int), typeof(bool), typeof(int), typeof(float) });
+			if (AddStatusEffectSignature is null)
+			{
+				Log.LogError($"Could not find {nameof(SEMan)}.{nameof(SEMan.AddStatusEffect)}. Active boss powers will not work until PassivePowers is updated for this Valheim version.");
+				return instructions;
+			}
 
+			return ReplaceAddStatusEffect(instructions);
+		}
+
+		private static IEnumerable<CodeInstruction> ReplaceAddStatusEffect(IEnumerable<CodeInstruction> instructions)
+		{
 			foreach (CodeInstruction instruction in instructions)
 			{
-				if (instruction.Calls(AddStatusEffect))
-				{
-					yield return new CodeInstruction(OpCodes.Call, AccessTools.DeclaredMethod(typeof(DedicatedGuardianPowerRPC), nameof(StatusEffectRPC)));
-				}
-				else
-				{
-					yield return instruction;
-				}
+				yield return instruction.Calls(AddStatusEffectSignature) ? new CodeInstruction(OpCodes.Call, StatusEffectRPCReplacement) : instruction;
 			}
 		}
 	}
@@ -361,7 +380,10 @@ public class PassivePowers : BaseUnityPlugin
 			}
 			powers.Add(Localization.instance.Localize("$powers_activation_hint", Utils.getHumanFriendlyTime(activeBossPowerCooldown.Value), Utils.getHumanFriendlyTime(activeBossPowerDuration.Value)));
 			addTooltips(p => (int)p.BoxedActive, "active");
-			powers.Add(Localization.instance.Localize("$powers_depletion_hint", Utils.getHumanFriendlyTime(activeBossPowerDepletion.Value)));
+			if (activeBossPowerDepletion.Value > 0)
+			{
+				powers.Add(Localization.instance.Localize("$powers_depletion_hint", Utils.getHumanFriendlyTime(activeBossPowerDepletion.Value)));
+			}
 		}
 
 		statusEffect.m_tooltip = string.Join("\n", powers);
@@ -618,7 +640,7 @@ public class PassivePowers : BaseUnityPlugin
 	{
 		private static void Prefix(PlayerProfile __instance, Player player)
 		{
-			foreach (KeyValuePair<string, float> stat in __instance.m_enemyStats)
+			foreach (KeyValuePair<string, float> stat in __instance.EnemyStats())
 			{
 				player.m_customData[stat.Key] = stat.Value.ToString(CultureInfo.InvariantCulture);
 			}
@@ -632,11 +654,12 @@ public class PassivePowers : BaseUnityPlugin
 		{
 			if (ZNetScene.instance)
 			{
+				Dictionary<string, float> enemyStats = __instance.EnemyStats();
 				foreach (GameObject gameObject in ZNetScene.instance.m_prefabs)
 				{
-					if (gameObject.GetComponent<Character>() is { } character && player.m_customData.TryGetValue(character.m_name, out string valueStr) && float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) && !__instance.m_enemyStats.ContainsKey(character.m_name))
+					if (gameObject.GetComponent<Character>() is { } character && player.m_customData.TryGetValue(character.m_name, out string valueStr) && float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) && !enemyStats.ContainsKey(character.m_name))
 					{
-						__instance.m_enemyStats[character.m_name] = value;
+						enemyStats[character.m_name] = value;
 					}
 				}
 			}
@@ -666,6 +689,6 @@ public class PassivePowers : BaseUnityPlugin
 
 	private static void BossDied(long sender, string bossName)
 	{
-		Game.instance.GetPlayerProfile().m_enemyStats.IncrementOrSet(bossName);
+		Game.instance.GetPlayerProfile().EnemyStats().IncrementOrSet(bossName);
 	}
 }
