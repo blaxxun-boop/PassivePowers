@@ -134,9 +134,9 @@ public static class BossPowerPatches
 				hit.m_damage.m_frost *= 1 - BonusFrostDefense.Total() / 100f;
 				hit.m_damage.m_poison *= 1 - BonusPoisonDefense.Total() / 100f;
 				hit.m_damage.m_lightning *= 1 - BonusLightningDefense.Total() / 100f;
-                hit.m_damage.m_blunt *= 1 - PhysicalDamage.Total() / 100f;
-                hit.m_damage.m_pierce *= 1 - PhysicalDamage.Total() / 100f;
-                hit.m_damage.m_slash *= 1 - PhysicalDamage.Total() / 100f;
+                hit.m_damage.m_blunt *= 1 - (PhysicalDamage.Total() + BonusBluntDefense.Total()) / 100f;
+                hit.m_damage.m_pierce *= 1 - (PhysicalDamage.Total() + BonusPierceDefense.Total()) / 100f;
+                hit.m_damage.m_slash *= 1 - (PhysicalDamage.Total() + BonusSlashDefense.Total()) / 100f;
             }
 		}
 	}
